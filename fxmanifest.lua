@@ -8,5 +8,6 @@ version '1.0.0'
 server_scripts {
     '@oxmysql/lib/MySQL.lua',
     'config.lua',
+    'adapters/*.lua',
     'server.lua'
 }
