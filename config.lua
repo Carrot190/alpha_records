@@ -10,4 +10,4 @@ Config.CheckInterval = 60 -- seconds
 Config.Debug = true
 
 -- Supported MDTs
-Config.MDT = "tk_mdt" -- Options: "tk_mdt", "ps_mdt", "lb_tablet", "custom"
+Config.MDT = "tk_mdt" -- Options: "tk_mdt", "ps_mdt", "lb_tablet", "qs_mdt", "custom"

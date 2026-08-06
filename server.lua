@@ -8,11 +8,10 @@ end
 
 local function getLastSynced()
     local saved = GetResourceKvpString("alpha_records_last_id")
+
     if saved then
         lastSyncedId = tonumber(saved) or 0
     end
-
-    debugPrint("Last synced MDT incident ID: " .. lastSyncedId)
 end
 
 local function saveLastSynced(id)
@@ -20,52 +19,16 @@ local function saveLastSynced(id)
     SetResourceKvp("alpha_records_last_id", tostring(id))
 end
 
-local function decodeJson(value)
-    if not value or value == "" then return nil end
-
-    local ok, decoded = pcall(json.decode, value)
-
-    if ok then
-        return decoded
-    end
-
-    return nil
-end
-
-local function getChargeNames(charges)
-    if not charges or #charges == 0 then
-        return "Unknown Charges"
-    end
-
-    local names = {}
-
-    for _, charge in ipairs(charges) do
-        local chargeId = charge.id
-        local amount = charge.amount or 1
-
-        local result = MySQL.single.await(
-            "SELECT name FROM tk_mdt_charges WHERE id = ?",
-            { chargeId }
-        )
-
-        if result and result.name then
-            table.insert(names, result.name .. " x" .. amount)
-        else
-            table.insert(names, "Charge ID " .. tostring(chargeId) .. " x" .. amount)
-        end
-    end
-
-    return table.concat(names, ", ")
-end
-
 local function sendToBot(data)
     PerformHttpRequest(Config.BotApiUrl, function(statusCode, response)
+
         if statusCode == 200 then
             debugPrint("Synced arrest record: " .. (data.character_name or "Unknown"))
         else
             print("^1[Alpha Records]^7 Failed to sync record. HTTP: " .. tostring(statusCode))
             print("^1[Alpha Records]^7 Response: " .. tostring(response))
         end
+
     end, "POST", json.encode(data), {
         ["Content-Type"] = "application/json",
         ["x-alpha-key"] = Config.ApiKey
@@ -73,58 +36,44 @@ local function sendToBot(data)
 end
 
 local function syncIncidents()
-    local rows = MySQL.query.await(
-        [[
-            SELECT id, title, creator, date, criminals, content
-            FROM tk_mdt_incidents
-            WHERE id > ?
-            ORDER BY id ASC
-        ]],
-        { lastSyncedId }
-    )
 
-    if not rows or #rows == 0 then
+    local adapter = AlphaRecordsAdapters[Config.MDT]
+
+    if not adapter then
+        print("^1[Alpha Records]^7 Unknown MDT: " .. tostring(Config.MDT))
         return
     end
 
-    for _, incident in ipairs(rows) do
-        local criminals = decodeJson(incident.criminals)
+    local records = adapter.GetNewRecords(lastSyncedId)
 
-        if criminals and type(criminals) == "table" then
-            for _, criminal in ipairs(criminals) do
-                if criminal.processed == true then
-                    local charges = getChargeNames(criminal.charges)
-
-                    local record = {
-                        guild_id = Config.GuildId,
-                        citizenid = criminal.identifier,
-                        character_name = criminal.name,
-                        officer_name = incident.creator,
-                        charges = charges,
-                        fine = criminal.fine or 0,
-                        jail_time = criminal.sentence or 0,
-                        case_number = "TK-" .. tostring(incident.id),
-                        source = "tk_mdt"
-                    }
-
-                    sendToBot(record)
-                end
-            end
-        end
-
-        saveLastSynced(incident.id)
+    if not records or #records == 0 then
+        return
     end
+
+    for _, record in ipairs(records) do
+
+        record.guild_id = Config.GuildId
+        record.source = Config.MDT
+
+        sendToBot(record)
+
+        saveLastSynced(record.sync_id)
+
+    end
+
 end
 
 CreateThread(function()
+
     Wait(5000)
 
     getLastSynced()
 
-    debugPrint("Bridge started.")
+    debugPrint("Bridge started using " .. Config.MDT)
 
     while true do
         syncIncidents()
         Wait(Config.CheckInterval * 1000)
     end
+
 end)
